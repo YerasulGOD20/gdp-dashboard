@@ -1,4 +1,4 @@
-# :earth_americas: GDP dashboard template
+# :earth_americas: Food shock dashboard template
 
 A simple app showing the Kazahstan meat and milk productiom
 
