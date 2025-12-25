@@ -5,147 +5,188 @@ from pathlib import Path
 
 # Set the title and favicon that appear in the Browser's tab bar.
 st.set_page_config(
-    page_title='GDP dashboard',
-    page_icon=':earth_americas:', # This is an emoji shortcode. Could be a URL too.
+    page_title='Predictions Dashboard',
+    page_icon='📊',
 )
 
 # -----------------------------------------------------------------------------
 # Declare some useful functions.
 
 @st.cache_data
-def get_gdp_data():
-    """Grab GDP data from a CSV file.
+def get_predictions_data():
+    """Grab predictions data from Excel or CSV file.
 
-    This uses caching to avoid having to read the file every time. If we were
-    reading from an HTTP endpoint instead of a file, it's a good idea to set
-    a maximum age to the cache with the TTL argument: @st.cache_data(ttl='1d')
+    This uses caching to avoid having to read the file every time.
     """
 
-    # Instead of a CSV on disk, you could read from an HTTP endpoint here too.
-    DATA_FILENAME = Path(__file__).parent/'data/gdp_data.csv'
-    raw_gdp_df = pd.read_csv(DATA_FILENAME)
+    # Путь к папке с данными
+    DATA_FOLDER = Path(__file__).parent/'data'
+    
+    # Попробуем найти Excel файл сначала
+    excel_files = list(DATA_FOLDER.glob('*.xlsx')) + list(DATA_FOLDER.glob('*.xls'))
+    
+    if excel_files:
+        # Если нашли Excel файл, читаем его
+        data_file = excel_files[0]
+        try:
+            predictions_df = pd.read_excel(data_file)
+            print(f"Successfully read Excel file: {data_file.name}, rows: {len(predictions_df)}")
+            return predictions_df
+        except Exception as e:
+            print(f"Error reading Excel: {e}")
+    
+    # Если Excel не нашли, пробуем CSV
+    csv_file = DATA_FOLDER / 'Sheet1.csv'
+    
+    if csv_file.exists():
+        try:
+            predictions_df = pd.read_csv(
+                csv_file, 
+                encoding='latin-1',
+                on_bad_lines='skip',
+                engine='python'
+            )
+            print(f"Successfully read CSV file, rows: {len(predictions_df)}")
+            return predictions_df
+        except Exception as e:
+            print(f"Error reading CSV: {e}")
+    
+    st.error("Не удалось найти файл с данными. Поместите файл predictions.xlsx или predictions.csv в папку data/")
+    return pd.DataFrame()
 
-    MIN_YEAR = 1960
-    MAX_YEAR = 2022
-
-    # The data above has columns like:
-    # - Country Name
-    # - Country Code
-    # - [Stuff I don't care about]
-    # - GDP for 1960
-    # - GDP for 1961
-    # - GDP for 1962
-    # - ...
-    # - GDP for 2022
-    #
-    # ...but I want this instead:
-    # - Country Name
-    # - Country Code
-    # - Year
-    # - GDP
-    #
-    # So let's pivot all those year-columns into two: Year and GDP
-    gdp_df = raw_gdp_df.melt(
-        ['Country Code'],
-        [str(x) for x in range(MIN_YEAR, MAX_YEAR + 1)],
-        'Year',
-        'GDP',
-    )
-
-    # Convert years from string to integers
-    gdp_df['Year'] = pd.to_numeric(gdp_df['Year'])
-
-    return gdp_df
-
-gdp_df = get_gdp_data()
+predictions_df = get_predictions_data()
 
 # -----------------------------------------------------------------------------
 # Draw the actual page
 
 # Set the title that appears at the top of the page.
 '''
-# :earth_americas: GDP dashboard
+# 📊 Predictions Dashboard
 
-Browse GDP data from the [World Bank Open Data](https://data.worldbank.org/) website. As you'll
-notice, the data only goes to 2022 right now, and datapoints for certain years are often missing.
-But it's otherwise a great (and did I mention _free_?) source of data.
+Анализ данных предсказаний из вашего проекта по data mining.
 '''
 
 # Add some spacing
 ''
 ''
 
-min_value = gdp_df['Year'].min()
-max_value = gdp_df['Year'].max()
+if predictions_df.empty:
+    st.error("Не удалось загрузить данные")
+    st.info("💡 **Совет:** Поместите ваш Excel файл (predictions.xlsx) в папку `data/`")
+    st.stop()
 
-from_year, to_year = st.slider(
-    'Which years are you interested in?',
-    min_value=min_value,
-    max_value=max_value,
-    value=[min_value, max_value])
+# Показываем основную информацию о данных
+st.header('Обзор данных', divider='gray')
 
-countries = gdp_df['Country Code'].unique()
+col1, col2, col3 = st.columns(3)
 
-if not len(countries):
-    st.warning("Select at least one country")
+with col1:
+    st.metric(
+        label="Всего записей",
+        value=f"{len(predictions_df):,}"
+    )
 
-selected_countries = st.multiselect(
-    'Which countries would you like to view?',
-    countries,
-    ['DEU', 'FRA', 'GBR', 'BRA', 'MEX', 'JPN'])
+with col2:
+    st.metric(
+        label="Количество колонок",
+        value=len(predictions_df.columns)
+    )
 
-''
-''
-''
-
-# Filter the data
-filtered_gdp_df = gdp_df[
-    (gdp_df['Country Code'].isin(selected_countries))
-    & (gdp_df['Year'] <= to_year)
-    & (from_year <= gdp_df['Year'])
-]
-
-st.header('GDP over time', divider='gray')
-
-''
-
-st.line_chart(
-    filtered_gdp_df,
-    x='Year',
-    y='GDP',
-    color='Country Code',
-)
+with col3:
+    # Если есть числовые колонки, показываем их количество
+    numeric_cols = predictions_df.select_dtypes(include=['number']).columns
+    st.metric(
+        label="Числовых колонок",
+        value=len(numeric_cols)
+    )
 
 ''
 ''
 
-
-first_year = gdp_df[gdp_df['Year'] == from_year]
-last_year = gdp_df[gdp_df['Year'] == to_year]
-
-st.header(f'GDP in {to_year}', divider='gray')
+# Показываем первые строки данных
+st.header('Просмотр данных', divider='gray')
 
 ''
 
-cols = st.columns(4)
+# Позволяем выбрать количество строк для отображения
+num_rows = st.slider('Количество строк для отображения:', 5, 100, 10)
 
-for i, country in enumerate(selected_countries):
-    col = cols[i % len(cols)]
+st.dataframe(predictions_df.head(num_rows), width='stretch')
 
-    with col:
-        first_gdp = first_year[first_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
-        last_gdp = last_year[last_year['Country Code'] == country]['GDP'].iat[0] / 1000000000
+''
+''
 
-        if math.isnan(first_gdp):
-            growth = 'n/a'
-            delta_color = 'off'
-        else:
-            growth = f'{last_gdp / first_gdp:,.2f}x'
-            delta_color = 'normal'
+# Если есть числовые колонки, показываем статистику
+if len(numeric_cols) > 0:
+    st.header('Статистика числовых данных', divider='gray')
+    
+    ''
+    
+    st.dataframe(predictions_df[numeric_cols].describe(), width='stretch')
+    
+    ''
+    ''
+    
+    # График для выбранной колонки
+    st.header('Визуализация данных', divider='gray')
+    
+    ''
+    
+    selected_column = st.selectbox(
+        'Выберите колонку для визуализации:',
+        numeric_cols
+    )
+    
+    if selected_column:
+        # Создаем копию данных с явным индексом для графика
+        chart_data = predictions_df[[selected_column]].copy()
+        chart_data = chart_data.reset_index(drop=True)
+        
+        # Рисуем график
+        st.line_chart(chart_data)
+        
+        ''
+        ''
+        
+        # Дополнительная статистика по выбранной колонке
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Минимум", f"{predictions_df[selected_column].min():.2f}")
+        with col2:
+            st.metric("Максимум", f"{predictions_df[selected_column].max():.2f}")
+        with col3:
+            st.metric("Среднее", f"{predictions_df[selected_column].mean():.2f}")
+        with col4:
+            st.metric("Медиана", f"{predictions_df[selected_column].median():.2f}")
 
-        st.metric(
-            label=f'{country} GDP',
-            value=f'{last_gdp:,.0f}B',
-            delta=growth,
-            delta_color=delta_color
-        )
+''
+''
+
+# Дополнительная информация о колонках
+st.header('Информация о колонках', divider='gray')
+
+''
+
+# Конвертируем типы данных в строки, чтобы избежать проблем с Arrow
+column_info = pd.DataFrame({
+    'Колонка': predictions_df.columns,
+    'Тип данных': [str(dtype) for dtype in predictions_df.dtypes.values],
+    'Пропущенные значения': predictions_df.isnull().sum().values,
+    'Уникальные значения': [predictions_df[col].nunique() for col in predictions_df.columns]
+})
+
+st.dataframe(column_info, width='stretch')
+
+''
+''
+
+# Показываем названия всех колонок
+st.header('Список всех колонок', divider='gray')
+
+''
+
+cols_list = st.columns(3)
+for idx, col_name in enumerate(predictions_df.columns):
+    with cols_list[idx % 3]:
+        st.write(f"**{idx + 1}.** {col_name}")
